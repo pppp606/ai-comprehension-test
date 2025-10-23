@@ -1,16 +1,17 @@
 import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
+import { describe, it, expect, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import { DEFAULT_AGENT_CONFIG, AIAgentClient, execCommand } from '../ai-agent-client';
 
-jest.mock('child_process', () => ({
-  spawn: jest.fn(),
+vi.mock('child_process', () => ({
+  spawn: vi.fn(),
 }));
 
 describe('loadAIAgentConfig', () => {
   const ORIGINAL_ENV = process.env;
 
   beforeEach(() => {
-    jest.resetModules();
+    vi.resetModules();
     process.env = { ...ORIGINAL_ENV };
   });
 
@@ -41,14 +42,14 @@ describe('loadAIAgentConfig', () => {
 });
 
 describe('execCommand', () => {
-  const spawnMock = require('child_process').spawn as jest.Mock;
-
   afterEach(() => {
-    jest.clearAllMocks();
-    jest.useRealTimers();
+    vi.clearAllMocks();
+    vi.useRealTimers();
   });
 
   it('resolves with stdout and stderr on successful execution', async () => {
+    const { spawn } = await import('child_process');
+    const spawnMock = vi.mocked(spawn);
     const child = createMockChildProcess({ exitCode: 0, stdout: 'hello', stderr: 'warn' });
     spawnMock.mockReturnValue(child);
 
@@ -59,6 +60,8 @@ describe('execCommand', () => {
   });
 
   it('rejects with metadata when process exits with non-zero code', async () => {
+    const { spawn } = await import('child_process');
+    const spawnMock = vi.mocked(spawn);
     const child = createMockChildProcess({ exitCode: 2, stdout: 'output', stderr: 'error' });
     spawnMock.mockReturnValue(child);
 
@@ -70,12 +73,14 @@ describe('execCommand', () => {
   });
 
   it('rejects with timeout error and kills the process', async () => {
-    jest.useFakeTimers();
+    const { spawn } = await import('child_process');
+    const spawnMock = vi.mocked(spawn);
+    vi.useFakeTimers();
     const child = createMockChildProcess({ exitCode: null });
     spawnMock.mockReturnValue(child);
 
     const promise = execCommand('sleep', [], { timeout: 1000 });
-    jest.runAllTimers();
+    vi.runAllTimers();
 
     await expect(promise).rejects.toMatchObject({ code: 'ETIMEDOUT' });
     expect(child.kill).toHaveBeenCalled();
@@ -83,13 +88,13 @@ describe('execCommand', () => {
 });
 
 describe('AIAgentClient', () => {
-  const spawnMock = require('child_process').spawn as jest.Mock;
-
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('calls Claude command with stdin input', async () => {
+    const { spawn } = await import('child_process');
+    const spawnMock = vi.mocked(spawn);
     const child = createMockChildProcess({ exitCode: 0, stdout: 'result' });
     spawnMock.mockReturnValue(child);
 
@@ -108,6 +113,8 @@ describe('AIAgentClient', () => {
   });
 
   it('passes prompt as argument for codex command', async () => {
+    const { spawn } = await import('child_process');
+    const spawnMock = vi.mocked(spawn);
     const child = createMockChildProcess({ exitCode: 0, stdout: 'codex response' });
     spawnMock.mockReturnValue(child);
 
@@ -125,6 +132,8 @@ describe('AIAgentClient', () => {
   });
 
   it('falls back to passing prompt via args for custom command', async () => {
+    const { spawn } = await import('child_process');
+    const spawnMock = vi.mocked(spawn);
     const child = createMockChildProcess({ exitCode: 0, stdout: 'ok' });
     spawnMock.mockReturnValue(child);
 
@@ -153,18 +162,18 @@ function createMockChildProcess({
 }): ChildProcess & {
   stdout: EventEmitter;
   stderr: EventEmitter;
-  stdin?: { write: jest.Mock; end: jest.Mock };
+  stdin?: { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> };
 } {
   const emitter = new EventEmitter() as ChildProcess & {
     stdout: EventEmitter;
     stderr: EventEmitter;
-    stdin?: { write: jest.Mock; end: jest.Mock };
+    stdin?: { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> };
   };
 
   emitter.stdout = new EventEmitter();
   emitter.stderr = new EventEmitter();
-  emitter.stdin = { write: jest.fn(), end: jest.fn() };
-  emitter.kill = jest.fn();
+  emitter.stdin = { write: vi.fn(), end: vi.fn() };
+  emitter.kill = vi.fn();
 
   process.nextTick(() => {
     if (stdout) {

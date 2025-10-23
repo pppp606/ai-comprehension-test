@@ -1,3 +1,4 @@
+import { describe, it, expect } from 'vitest';
 import { TestGenerator } from '../test-generator';
 import type { GenerateOptions, MethodInfo, ProjectStructure } from '../../types';
 
@@ -134,7 +135,7 @@ describe('TestGenerator', () => {
     const generator = new TestGenerator(structure, options);
     const tests = generator.generate();
 
-    expect(tests).toHaveLength(3);
+    expect(tests).toHaveLength(4);
     expect(tests.every((test) => test.targetElement.includes('PaymentManager'))).toBe(true);
   });
 });

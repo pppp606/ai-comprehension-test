@@ -1,11 +1,12 @@
+import { describe, it, expect, vi } from 'vitest';
 import type { AIAgentClient } from '../ai-agent-client';
 import type { JestRunner } from '../jest-runner';
 import { TestRunner } from '../test-runner';
 import type { Test } from '../../types';
 
 describe('TestRunner helpers', () => {
-  const agent = { call: jest.fn() } as unknown as AIAgentClient;
-  const jestRunner = { run: jest.fn() } as unknown as JestRunner;
+  const agent = { call: vi.fn() } as unknown as AIAgentClient;
+  const jestRunner = { run: vi.fn() } as unknown as JestRunner;
   const runner = new TestRunner(agent, jestRunner, {
     projectPath: '/repo',
     outputDir: '/repo/.ai-comp-test',
@@ -59,11 +60,11 @@ describe('TestRunner helpers', () => {
 describe('TestRunner run', () => {
   it('returns failure result when underlying execution throws', async () => {
     const agent = {
-      call: jest.fn().mockResolvedValue('{"nameAccuracy": false, "clarity": "LOW"}'),
+      call: vi.fn().mockResolvedValue('{"nameAccuracy": false, "clarity": "LOW"}'),
     } as unknown as AIAgentClient;
 
     const jestRunner = {
-      run: jest.fn().mockResolvedValue({ passed: true, output: 'ok', testResults: [] }),
+      run: vi.fn().mockResolvedValue({ passed: true, output: 'ok', testResults: [] }),
     } as unknown as JestRunner;
 
     const runner = new TestRunner(agent, jestRunner, {
