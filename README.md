@@ -111,7 +111,7 @@ Run TypeScript compilation checks:
 npm run build
 ```
 
-Execute unit tests (if present):
+Execute unit tests (if present, with Jest):
 
 ```bash
 npm test

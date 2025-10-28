@@ -18,7 +18,7 @@ npm run build
 # Run in development mode (uses tsx for direct TS execution)
 npm run dev -- run [project-path] [options]
 
-# Run unit tests (uses vitest)
+# Run unit tests (uses Jest)
 npm test
 
 # Run the built CLI

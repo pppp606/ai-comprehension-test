@@ -32,6 +32,12 @@ export function execCommand(command: string, args: string[], options: ExecOption
       cwd: options.cwd,
       stdio: options.input ? ['pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
     });
+    if (!child) {
+      const err = new Error('Failed to spawn process');
+      (err as any).code = 'ESPAWN';
+      reject(err);
+      return;
+    }
 
     let stdout = '';
     let stderr = '';
@@ -42,11 +48,11 @@ export function execCommand(command: string, args: string[], options: ExecOption
         }, options.timeout)
       : undefined;
 
-    child.stdout.on('data', (data) => {
+    child.stdout?.on('data', (data) => {
       stdout += data.toString();
     });
 
-    child.stderr.on('data', (data) => {
+    child.stderr?.on('data', (data) => {
       stderr += data.toString();
     });
 
