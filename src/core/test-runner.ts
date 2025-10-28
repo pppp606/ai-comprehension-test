@@ -81,8 +81,15 @@ export class TestRunner {
     }
 
     // Compute local stability score using parsed MR responses
-    const { scoreStability } = await import('./stability-scorer');
-    const local = scoreStability(responses);
+    const mode = process.env.AI_COMP_TEST_STABILITY_MODE || 'tfidf';
+    let local: any;
+    if (mode === 'embedding') {
+      const { scoreStabilityEmbedding } = await import('./stability-scorer');
+      local = await scoreStabilityEmbedding(responses);
+    } else {
+      const { scoreStability } = await import('./stability-scorer');
+      local = scoreStability(responses);
+    }
     const score = local.consistencyScore;
     const level = local.consistencyLevel as 'HIGH' | 'MEDIUM' | 'LOW' | undefined;
     const passed = score >= 50;

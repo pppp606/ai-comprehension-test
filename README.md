@@ -121,11 +121,22 @@ Stability judgment no longer performs a second LLM call. Instead, it runs a loca
 
 - Parses each MR response (with code‑fence and loose-object recovery).
 - Normalizes text and tokenizes key fields.
-- Computes per-field Jaccard similarity across responses and averages to a 0–100 `consistencyScore`.
+- Default: Vectorizes each field per response using TF‑IDF and computes average pairwise cosine similarity.
+- Averages per-field scores to a 0–100 `consistencyScore`.
 - Maps to `consistencyLevel` (HIGH ≥ 75, MEDIUM ≥ 50, else LOW).
 - Derives `mainIdea`, `variations` (summary of disagreements), `reasoning`, and `codeClarity`.
 
 This removes one LLM call from the Stability flow and improves reproducibility.
+
+### Embedding Mode (Optional)
+
+You can switch to an embedding-based scorer for better synonym/phrasing robustness:
+
+- Set `AI_COMP_TEST_STABILITY_MODE=embedding`
+- Optional: `AI_COMP_TEST_EMBED_MODEL` to override the default `Xenova/all-MiniLM-L6-v2`.
+- On first run, the model is downloaded (network required). Subsequent runs are cached.
+
+The embedding scorer creates sentence embeddings per field using `@xenova/transformers` (mean pooled) and uses pairwise cosine similarity, then aggregates like the default mode.
 
 ## Development Workflow
 
