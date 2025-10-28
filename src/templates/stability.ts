@@ -11,6 +11,7 @@ export function buildStabilityPrompt(options: StabilityPromptOptions): string {
     'You have access to the entire project codebase as context.',
     '',
     'Read the code and answer the question by returning ONLY a normalized JSON “meaning representation” (MR) that captures understanding independent of wording.',
+    'Strict requirements: Output must be valid JSON (double quotes, no comments, no trailing commas), a single object, and no markdown or extra text.',
     '',
     '## Target Code',
     `${elementType}: ${name}`,
