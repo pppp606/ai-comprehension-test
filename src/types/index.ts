@@ -7,6 +7,9 @@ export interface Test {
   prompt: string;
   targetElement: string;
   iterations?: number;
+  // Optional: absolute or project-relative path to the source file under test
+  // Used by the test-generation runner to compute correct import paths
+  sourceFilePath?: string;
 }
 
 export interface TestResult {

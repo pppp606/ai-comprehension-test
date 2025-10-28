@@ -20,6 +20,7 @@ program
   .option('--output <dir>', 'Output directory', '.ai-comp-test')
   .option('--format <format>', 'Report format: console | json', 'console')
   .option('--verbose', 'Enable verbose logging', false)
+  .option('--print-prompts', 'Print generated prompts and exit (dry-run)', false)
   .action(async (projectPath: string, options: any) => {
     try {
       await runCommand(projectPath, {
@@ -27,6 +28,7 @@ program
         output: options.output,
         format: options.format,
         verbose: options.verbose,
+        printPrompts: options.printPrompts,
       });
     } catch (error: any) {
       console.error(error?.message || error);

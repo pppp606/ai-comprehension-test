@@ -84,7 +84,7 @@ export class TestGenerator {
       name: `${cls.name} purpose consistency`,
       prompt,
       targetElement: cls.name,
-      iterations: 5,
+      iterations: 3,
     };
   }
 
@@ -101,6 +101,8 @@ export class TestGenerator {
       name: `${cls.name}.${method.name} test generation`,
       prompt,
       targetElement: `${cls.name}.${method.name}`,
+      // Persist the project-relative source file path to compute import path later
+      sourceFilePath: cls.file,
     };
   }
 

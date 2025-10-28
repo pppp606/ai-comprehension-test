@@ -8,29 +8,42 @@ export function buildStabilityJudgmentPrompt(options: StabilityJudgmentTemplateO
   const { originalQuestion, code, responses } = options;
   const labelled = responses
     .map((response, index) => `Response ${index + 1}: ${response}`)
-    .join(' ');
+    .join('\n');
 
   return [
     'You have access to the entire project codebase as context.',
     '',
-    'Evaluate the consistency of these 5 responses to the same question.',
+    'Each response is a JSON “meaning representation” (MR) of the same code/question. Judge semantic consistency of understanding, ignoring wording/formatting.',
     '',
     '## Original Question',
-    '',
     `"${originalQuestion}"`,
     '',
     '## Target Code',
-    '',
     '```typescript',
     code,
     '```',
     '',
-    '## 5 Responses',
-    '',
+    '## Responses (JSON per line)',
     labelled,
     '',
-    '## Task',
+    '## Evaluation Instructions',
+    '- Parse each response as JSON with fields: primaryPurpose, inputs, outputs, sideEffects, keyBehaviors, invariants.',
+    '- Determine if they describe the SAME functionality: same primary purpose; similar inputs/outputs; compatible side-effects; overlapping key behaviors; compatible invariants.',
+    '- Ignore stylistic phrasing and list ordering; focus on conceptual overlap.',
     '',
-    'Analyze the consistency of these responses and respond ONLY with JSON (no markdown, no extra text): { "consistencyScore": number, "consistencyLevel": "HIGH" | "MEDIUM" | "LOW", "mainIdea": "string", "variations": [ { "aspect": "string", "values": ["string"], "frequency": number } ], "reasoning": "string", "codeClarity": "CLEAR" | "AMBIGUOUS" | "MISLEADING" }'
+    'Consistency scale:',
+    '- HIGH: All (or all but one) responses align on primaryPurpose and agree on most inputs/outputs/behaviors; differences are minor granularity/synonyms.',
+    '- MEDIUM: Mixed agreement; at least two distinct interpretations or significant omissions/conflicts in multiple fields.',
+    '- LOW: Multiple conflicting interpretations; primaryPurpose differs or fields contradict each other broadly.',
+    '',
+    'Respond ONLY with JSON (no markdown, no extra text) in this shape:',
+    '{',
+    '  "consistencyScore": number,                  // 0-100',
+    '  "consistencyLevel": "HIGH" | "MEDIUM" | "LOW",',
+    '  "mainIdea": string,                          // canonicalized primary purpose',
+    '  "variations": [ { "aspect": string, "values": string[], "frequency": number } ],',
+    '  "reasoning": string,                         // 1-2 sentences explaining conflicts or alignment',
+    '  "codeClarity": "CLEAR" | "AMBIGUOUS" | "MISLEADING"',
+    '}'
   ].join('\n');
 }

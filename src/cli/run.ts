@@ -14,6 +14,7 @@ interface RunOptions {
   output: string;
   format: 'console' | 'json';
   verbose?: boolean;
+  printPrompts?: boolean;
 }
 
 export async function runCommand(projectPath: string, options: RunOptions): Promise<void> {
@@ -39,6 +40,17 @@ export async function runCommand(projectPath: string, options: RunOptions): Prom
 
   if (tests.length === 0) {
     throw new Error('No tests generated. Try specifying different files or adjust your project code.');
+  }
+
+  if (options.printPrompts) {
+    for (const t of tests) {
+      const header = `[${t.type}] ${t.id} ${t.name}${t.targetElement ? ` (${t.targetElement})` : ''}`;
+      console.log(header);
+      console.log('-'.repeat(header.length));
+      console.log(t.prompt);
+      console.log();
+    }
+    return;
   }
 
   const agentConfig = loadAIAgentConfig();
