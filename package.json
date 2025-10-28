@@ -17,11 +17,11 @@
   },
   "prepublishOnly": "npm run build",
   "dependencies": {
-    "chalk": "^5.3.0",
+    "chalk": "^4.1.2",
     "commander": "^11.0.0",
     "dotenv": "^16.0.0",
     "jest": "^29.0.0",
-    "ora": "^7.0.1",
+    "ora": "^5.4.1",
     "ts-jest": "^29.0.0",
     "typescript": "^5.0.0"
   },
