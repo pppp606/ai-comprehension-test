@@ -3,7 +3,7 @@ import path from 'path';
 import os from 'os';
 import { AIAgentClient } from './ai-agent-client';
 import { JestRunner } from './jest-runner';
-import { buildStabilityJudgmentPrompt } from '../templates';
+// Stability judgment is now local; no LLM prompt needed
 import { Test, TestGenerationResult, TestResult, StaticAnalysisResult, StabilityResult } from '../types';
 
 interface TestRunnerOptions {
@@ -80,17 +80,11 @@ export class TestRunner {
       responses.push(response.trim());
     }
 
-    const judgmentPrompt = buildStabilityJudgmentPrompt({
-      originalQuestion: this.extractQuestion(test.prompt),
-      code: this.extractCode(test.prompt),
-      responses,
-    });
-
-    const judgmentRaw = await this.agent.call(judgmentPrompt);
-    const parsed = this.parseJson(judgmentRaw, test.id);
-
-    const score = typeof parsed?.consistencyScore === 'number' ? parsed.consistencyScore : 0;
-    const level = parsed?.consistencyLevel as 'HIGH' | 'MEDIUM' | 'LOW' | undefined;
+    // Compute local stability score using parsed MR responses
+    const { scoreStability } = await import('./stability-scorer');
+    const local = scoreStability(responses);
+    const score = local.consistencyScore;
+    const level = local.consistencyLevel as 'HIGH' | 'MEDIUM' | 'LOW' | undefined;
     const passed = score >= 50;
 
     return {
@@ -104,10 +98,10 @@ export class TestRunner {
         responses,
         consistencyScore: score,
         consistencyLevel: level || 'LOW',
-        mainIdea: parsed?.mainIdea || '',
-        variations: parsed?.variations || [],
-        reasoning: parsed?.reasoning || '',
-        codeClarity: parsed?.codeClarity || 'AMBIGUOUS',
+        mainIdea: local.mainIdea || '',
+        variations: local.variations || [],
+        reasoning: local.reasoning || '',
+        codeClarity: local.codeClarity || 'AMBIGUOUS',
       },
       executedAt: new Date(),
     };
