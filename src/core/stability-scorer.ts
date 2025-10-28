@@ -307,7 +307,7 @@ export async function scoreStabilityEmbedding(responses: string[]): Promise<Stab
 
   // Lazy import to avoid adding heavy deps to non-embedding runs
   const { pipeline } = await import('@xenova/transformers');
-  const modelName = process.env.AI_COMP_TEST_EMBED_MODEL || 'Xenova/all-MiniLM-L6-v2';
+  const modelName = process.env.AI_COMP_TEST_EMBED_MODEL || 'Xenova/all-mpnet-base-v2';
   // quantized model to keep it light
   const extractor: any = await pipeline('feature-extraction', modelName, { quantized: true });
 

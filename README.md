@@ -133,10 +133,14 @@ This removes one LLM call from the Stability flow and improves reproducibility.
 You can switch to an embedding-based scorer for better synonym/phrasing robustness:
 
 - Set `AI_COMP_TEST_STABILITY_MODE=embedding`
-- Optional: `AI_COMP_TEST_EMBED_MODEL` to override the default `Xenova/all-MiniLM-L6-v2`.
+- Optional: `AI_COMP_TEST_EMBED_MODEL` to override the default `Xenova/all-mpnet-base-v2`.
 - On first run, the model is downloaded (network required). Subsequent runs are cached.
 
 The embedding scorer creates sentence embeddings per field using `@xenova/transformers` (mean pooled) and uses pairwise cosine similarity, then aggregates like the default mode.
+
+Notes:
+- Default embedding model: `Xenova/all-mpnet-base-v2` (higher accuracy; heavier).
+- Lighter alternative: `Xenova/all-MiniLM-L6-v2` (faster; slightly lower accuracy).
 
 ## Development Workflow
 
