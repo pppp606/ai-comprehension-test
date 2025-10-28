@@ -36,7 +36,7 @@ npx ai-comprehension-test run [project-path] [options]
 
 - `AI_COMP_TEST_COMMAND` - AI agent command (default: `claude`)
 - `AI_COMP_TEST_ARGS` - Arguments for the agent (default: `-p`)
-- `AI_COMP_TEST_TIMEOUT` - Timeout in seconds (default: `60`)
+- `AI_COMP_TEST_TIMEOUT` - Timeout in seconds (default: `180`)
 - `AI_COMP_TEST_DEBUG` - Enable debug output (default: `false`)
 
 ## Architecture

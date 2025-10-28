@@ -6,13 +6,13 @@ export const DEFAULT_AGENT_CONFIG: AIAgentConfig = {
   command: 'claude',
   args: ['-p'],
   workingDir: process.cwd(),
-  timeout: 60_000,
+  timeout: 180_000,
 };
 
 export function loadAIAgentConfig(): AIAgentConfig {
   const command = process.env.AI_COMP_TEST_COMMAND || DEFAULT_AGENT_CONFIG.command;
   const argsRaw = process.env.AI_COMP_TEST_ARGS || DEFAULT_AGENT_CONFIG.args.join(' ');
-  const timeoutSec = Number.parseInt(process.env.AI_COMP_TEST_TIMEOUT || '60', 10);
+  const timeoutSec = Number.parseInt(process.env.AI_COMP_TEST_TIMEOUT || '180', 10);
   const timeout = Number.isNaN(timeoutSec) ? DEFAULT_AGENT_CONFIG.timeout : timeoutSec * 1000;
   const workingDir = process.env.AI_COMP_TEST_WORKDIR
     ? path.resolve(process.env.AI_COMP_TEST_WORKDIR)

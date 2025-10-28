@@ -42,7 +42,7 @@ You can configure how the CLI invokes the AI agent via environment variables:
 |----------|-------------|---------|
 | `AI_COMP_TEST_COMMAND` | Command used to call the AI agent. | `claude` |
 | `AI_COMP_TEST_ARGS` | Arguments passed to the AI agent command. | `-p` |
-| `AI_COMP_TEST_TIMEOUT` | Timeout in seconds for AI calls. | `60` |
+| `AI_COMP_TEST_TIMEOUT` | Timeout in seconds for AI calls. | `180` |
 | `AI_COMP_TEST_DEBUG` | Enable verbose debugging output (`true` / `false`). | `false` |
 
 For example, to run against Codex:
@@ -61,7 +61,7 @@ Example `.env`:
 ```
 AI_COMP_TEST_COMMAND=claude
 AI_COMP_TEST_ARGS=-p
-AI_COMP_TEST_TIMEOUT=120
+AI_COMP_TEST_TIMEOUT=180
 # AI_COMP_TEST_WORKDIR=/absolute/path/to/workdir
 ```
 
