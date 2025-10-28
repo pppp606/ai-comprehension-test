@@ -52,6 +52,24 @@ export AI_COMP_TEST_COMMAND=codex
 export AI_COMP_TEST_ARGS="exec"
 ```
 
+### Using .env
+
+This CLI loads environment variables from a `.env` file in the current working directory. An example template is provided as `.env.example`.
+
+Example `.env`:
+
+```
+AI_COMP_TEST_COMMAND=claude
+AI_COMP_TEST_ARGS=-p
+AI_COMP_TEST_TIMEOUT=120
+# AI_COMP_TEST_WORKDIR=/absolute/path/to/workdir
+```
+
+Notes:
+- `AI_COMP_TEST_ARGS` is split by spaces. Prefer `--flag=value` for values containing spaces.
+- Shell environment variables override values from `.env`.
+- The `.env` file should be placed in the directory where you run the CLI.
+
 ## Usage
 
 The CLI exposes a single `run` command. Invoke it from the root of the project you want to analyze:
