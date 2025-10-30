@@ -5,7 +5,7 @@
 ## Key Features
 
 - **Automated project scanning** – analyzes classes, methods, and functions in your TypeScript project.
-- **Multiple comprehension test types** – static analysis, stability checks, and AI-generated Jest tests.
+- **Multiple comprehension test types** – static analysis, stability checks (local, deterministic scoring), and AI-generated Jest tests.
 - **AI agent orchestration** – prompts a local Claude Code or Codex instance and parses structured responses.
 - **Detailed reporting** – view friendly console summaries or machine-readable JSON output with actionable insights.
 
@@ -114,6 +114,33 @@ npx ai-comprehension-test run ../another-project
 
 - **Console report** – Summaries, tables of test outcomes, and highlighted critical issues.
 - **JSON report** – Structured machine-readable output saved to `<output>/results.json` when `--format json` is specified.
+
+## Stability Scoring
+
+Stability judgment no longer performs a second LLM call. Instead, it runs a local, deterministic scorer over the multiple MR (JSON) responses produced by the agent:
+
+- Parses each MR response (with code‑fence and loose-object recovery).
+- Normalizes text and tokenizes key fields.
+- Default: Vectorizes each field per response using TF‑IDF and computes average pairwise cosine similarity.
+- Averages per-field scores to a 0–100 `consistencyScore`.
+- Maps to `consistencyLevel` (HIGH ≥ 75, MEDIUM ≥ 50, else LOW).
+- Derives `mainIdea`, `variations` (summary of disagreements), `reasoning`, and `codeClarity`.
+
+This removes one LLM call from the Stability flow and improves reproducibility.
+
+### Embedding Mode (Optional)
+
+You can switch to an embedding-based scorer for better synonym/phrasing robustness:
+
+- Set `AI_COMP_TEST_STABILITY_MODE=embedding`
+- Optional: `AI_COMP_TEST_EMBED_MODEL` to override the default `Xenova/all-mpnet-base-v2`.
+- On first run, the model is downloaded (network required). Subsequent runs are cached.
+
+The embedding scorer creates sentence embeddings per field using `@xenova/transformers` (mean pooled) and uses pairwise cosine similarity, then aggregates like the default mode.
+
+Notes:
+- Default embedding model: `Xenova/all-mpnet-base-v2` (higher accuracy; heavier).
+- Lighter alternative: `Xenova/all-MiniLM-L6-v2` (faster; slightly lower accuracy).
 
 ## Development Workflow
 
