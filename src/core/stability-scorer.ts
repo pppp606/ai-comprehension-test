@@ -67,6 +67,23 @@ function tokensFromList(list: string[] | undefined): string[] {
 
 type Vector = Map<string, number>; // sparse TF-IDF
 
+// Stopwords for variations display only (does not affect scoring)
+const DISPLAY_STOPWORDS = new Set<string>([
+  'a','an','the','and','or','to','of','for','in','on','with','without','by','from','is','are','be','as','at','it','this','that','these','those','into','via','over','under'
+]);
+
+function isNumericToken(t: string): boolean {
+  return /^\d+$/.test(t);
+}
+
+function isNoisyTokenForDisplay(t: string): boolean {
+  if (!t) return true;
+  if (t.length <= 2) return true;
+  if (isNumericToken(t)) return true;
+  if (DISPLAY_STOPWORDS.has(t)) return true;
+  return false;
+}
+
 function buildTfIdfVectors(docsTokens: string[][]): Vector[] {
   const n = docsTokens.length;
   if (n === 0) return [];
@@ -129,6 +146,71 @@ function averagePairwiseCosine(vectors: Vector[]): number {
   return pairs ? total / pairs : 1;
 }
 
+// --- Inconsistency penalty (numbers/constants) helpers ---
+function extractNumbers(text: string): Set<string> {
+  const nums = new Set<string>();
+  const re = /-?\d+(?:\.\d+)?/g;
+  const m = String(text).match(re);
+  if (m) for (const v of m) nums.add(v);
+  return nums;
+}
+
+const CONST_TOKENS = new Set<string>([
+  'true', 'false', 'enabled', 'disabled', 'on', 'off',
+  'utc', 'local', 'asc', 'desc', 'ascending', 'descending'
+]);
+
+function extractConstants(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const t of tokenize(text)) {
+    if (CONST_TOKENS.has(t)) out.add(t);
+  }
+  return out;
+}
+
+function computeInconsistencyPenalty(
+  texts: string[],
+  // pairwise similarity function over indices (i,j) -> [0,1]
+  simAt: (i: number, j: number) => number,
+  options: { threshold: number; maxPenalty: number },
+): number {
+  const n = texts.length;
+  if (n <= 1) return 0;
+  let conflicts = 0;
+  let pairs = 0;
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const s = simAt(i, j);
+      if (s >= options.threshold) {
+        const numsA = extractNumbers(texts[i]);
+        const numsB = extractNumbers(texts[j]);
+        const constA = extractConstants(texts[i]);
+        const constB = extractConstants(texts[j]);
+
+        let numericConflict = false;
+        if (numsA.size && numsB.size) {
+          let inter = 0;
+          for (const v of numsA) if (numsB.has(v)) inter += 1;
+          numericConflict = inter === 0; // no shared number
+        }
+
+        let constConflict = false;
+        if (constA.size && constB.size) {
+          let inter = 0;
+          for (const v of constA) if (constB.has(v)) inter += 1;
+          constConflict = inter === 0; // no shared constant
+        }
+
+        if (numericConflict || constConflict) conflicts += 1;
+      }
+      pairs += 1;
+    }
+  }
+  if (!pairs) return 0;
+  const ratio = conflicts / pairs;
+  return Math.min(options.maxPenalty, ratio * options.maxPenalty);
+}
+
 function modeString(values: string[]): string {
   const normToOriginal: Record<string, string> = {};
   const counts: Record<string, number> = {};
@@ -176,6 +258,7 @@ function buildVariations(mrs: MR[]): Array<{ aspect: string; values: string[]; f
       counts[item] = perRespSets.reduce((acc, s) => acc + (s.has(item) ? 1 : 0), 0);
     }
     const variantItems = Object.entries(counts)
+      .filter(([val, _c]) => !isNoisyTokenForDisplay(val))
       .filter(([, c]) => c !== perRespSets.length) // not present in all
       .sort((a, b) => b[1] - a[1])
       .slice(0, 3);
@@ -230,15 +313,48 @@ export function scoreStability(responses: string[]): StabilityScore {
     invariants: averagePairwiseCosine(invVectors),
   };
 
-  // Equal weights across six fields
+  // Apply numeric/constant inconsistency penalties on selected fields (display-only filters do not affect this)
+  const texts = {
+    inputs: mrs.map((m) => (m.inputs || []).join(' ')),
+    outputs: mrs.map((m) => (m.outputs || []).join(' ')),
+    keyBehaviors: mrs.map((m) => (m.keyBehaviors || []).join(' ')),
+    invariants: mrs.map((m) => (m.invariants || []).join(' ')),
+  } as const;
+
+  function simFromVectors(vs: Vector[]) {
+    return (i: number, j: number) => cosine(vs[i], vs[j]);
+  }
+
+  const penalties = {
+    // caps chosen for good balance; keep overall within reasonable sensitivity
+    inputs: computeInconsistencyPenalty(texts.inputs, simFromVectors(inputsVectors), { threshold: 0.6, maxPenalty: 0.10 }),
+    outputs: computeInconsistencyPenalty(texts.outputs, simFromVectors(outputsVectors), { threshold: 0.6, maxPenalty: 0.10 }),
+    keyBehaviors: computeInconsistencyPenalty(texts.keyBehaviors, simFromVectors(kbVectors), { threshold: 0.6, maxPenalty: 0.15 }),
+    invariants: computeInconsistencyPenalty(texts.invariants, simFromVectors(invVectors), { threshold: 0.6, maxPenalty: 0.15 }),
+  } as const;
+
+  fieldScores.inputs = Math.max(0, fieldScores.inputs - penalties.inputs);
+  fieldScores.outputs = Math.max(0, fieldScores.outputs - penalties.outputs);
+  fieldScores.keyBehaviors = Math.max(0, fieldScores.keyBehaviors - penalties.keyBehaviors);
+  fieldScores.invariants = Math.max(0, fieldScores.invariants - penalties.invariants);
+
+  // Weighted average across fields (emphasize purpose and key behaviors)
+  const WEIGHTS = {
+    primaryPurpose: 0.25,
+    keyBehaviors: 0.30,
+    inputs: 0.15,
+    outputs: 0.15,
+    sideEffects: 0.10,
+    invariants: 0.05,
+  } as const;
+
   const overall =
-    (fieldScores.primaryPurpose +
-      fieldScores.inputs +
-      fieldScores.outputs +
-      fieldScores.sideEffects +
-      fieldScores.keyBehaviors +
-      fieldScores.invariants) /
-    6;
+    fieldScores.primaryPurpose * WEIGHTS.primaryPurpose +
+    fieldScores.keyBehaviors * WEIGHTS.keyBehaviors +
+    fieldScores.inputs * WEIGHTS.inputs +
+    fieldScores.outputs * WEIGHTS.outputs +
+    fieldScores.sideEffects * WEIGHTS.sideEffects +
+    fieldScores.invariants * WEIGHTS.invariants;
 
   const score = Math.round(overall * 100);
   const level: ConsistencyLevel = score >= 75 ? 'HIGH' : score >= 50 ? 'MEDIUM' : 'LOW';
@@ -248,12 +364,15 @@ export function scoreStability(responses: string[]): StabilityScore {
 
   const variations = buildVariations(mrs);
 
-  // Heuristic code clarity using primaryPurpose agreement and overall
+  // Code clarity aligned with overall level, with special case for extremely low primary purpose agreement
   const ppAgree = fieldScores.primaryPurpose;
   let codeClarity: CodeClarity;
-  if (ppAgree >= 0.8 && overall >= 0.7) codeClarity = 'CLEAR';
-  else if (ppAgree < 0.4 || overall < 0.4) codeClarity = 'MISLEADING';
-  else codeClarity = 'AMBIGUOUS';
+  if (level === 'HIGH') codeClarity = 'CLEAR';
+  else if (level === 'MEDIUM') codeClarity = 'AMBIGUOUS';
+  else codeClarity = 'MISLEADING';
+  if (ppAgree < 0.35 && codeClarity !== 'MISLEADING') {
+    codeClarity = codeClarity === 'CLEAR' ? 'AMBIGUOUS' : 'MISLEADING';
+  }
 
   const reasoningParts: string[] = [];
   reasoningParts.push(
@@ -305,8 +424,10 @@ export async function scoreStabilityEmbedding(responses: string[]): Promise<Stab
     };
   }
 
-  // Lazy import to avoid adding heavy deps to non-embedding runs
-  const { pipeline } = await import('@xenova/transformers');
+  // Lazy ESM import: ensure we don't transpile to require() under CJS
+  // Use Function('m', 'return import(m)') trick to preserve dynamic import
+  const mod: any = await (Function('m', 'return import(m)'))('@xenova/transformers');
+  const { pipeline } = mod;
   const modelName = process.env.AI_COMP_TEST_EMBED_MODEL || 'Xenova/all-mpnet-base-v2';
   // quantized model to keep it light
   const extractor: any = await pipeline('feature-extraction', modelName, { quantized: true });
@@ -380,14 +501,54 @@ export async function scoreStabilityEmbedding(responses: string[]): Promise<Stab
     invariants: avgPairwiseCosineDense(invVecs),
   };
 
+  // Apply numeric/constant inconsistency penalties on selected fields
+  const texts = {
+    inputs: inputsTexts,
+    outputs: outputsTexts,
+    keyBehaviors: kbTexts,
+    invariants: invTexts,
+  } as const;
+
+  function simFromDense(vs: number[][]) {
+    const norms = vs.map((v) => Math.sqrt(v.reduce((s, x) => s + x * x, 0)) || 1);
+    return (i: number, j: number) => {
+      let dot = 0;
+      const vi = vs[i];
+      const vj = vs[j];
+      for (let k = 0; k < vi.length && k < vj.length; k++) dot += vi[k] * vj[k];
+      const denom = norms[i] * norms[j];
+      return denom ? dot / denom : 0;
+    };
+  }
+
+  const penalties = {
+    inputs: computeInconsistencyPenalty(texts.inputs, simFromDense(inVecs), { threshold: 0.7, maxPenalty: 0.10 }),
+    outputs: computeInconsistencyPenalty(texts.outputs, simFromDense(outVecs), { threshold: 0.7, maxPenalty: 0.10 }),
+    keyBehaviors: computeInconsistencyPenalty(texts.keyBehaviors, simFromDense(kbVecs), { threshold: 0.7, maxPenalty: 0.15 }),
+    invariants: computeInconsistencyPenalty(texts.invariants, simFromDense(invVecs), { threshold: 0.7, maxPenalty: 0.15 }),
+  } as const;
+
+  fieldScores.inputs = Math.max(0, fieldScores.inputs - penalties.inputs);
+  fieldScores.outputs = Math.max(0, fieldScores.outputs - penalties.outputs);
+  fieldScores.keyBehaviors = Math.max(0, fieldScores.keyBehaviors - penalties.keyBehaviors);
+  fieldScores.invariants = Math.max(0, fieldScores.invariants - penalties.invariants);
+
+  const WEIGHTS = {
+    primaryPurpose: 0.25,
+    keyBehaviors: 0.30,
+    inputs: 0.15,
+    outputs: 0.15,
+    sideEffects: 0.10,
+    invariants: 0.05,
+  } as const;
+
   const overall =
-    (fieldScores.primaryPurpose +
-      fieldScores.inputs +
-      fieldScores.outputs +
-      fieldScores.sideEffects +
-      fieldScores.keyBehaviors +
-      fieldScores.invariants) /
-    6;
+    fieldScores.primaryPurpose * WEIGHTS.primaryPurpose +
+    fieldScores.keyBehaviors * WEIGHTS.keyBehaviors +
+    fieldScores.inputs * WEIGHTS.inputs +
+    fieldScores.outputs * WEIGHTS.outputs +
+    fieldScores.sideEffects * WEIGHTS.sideEffects +
+    fieldScores.invariants * WEIGHTS.invariants;
 
   const score = Math.round(overall * 100);
   const level: ConsistencyLevel = score >= 75 ? 'HIGH' : score >= 50 ? 'MEDIUM' : 'LOW';
@@ -397,9 +558,12 @@ export async function scoreStabilityEmbedding(responses: string[]): Promise<Stab
 
   const ppAgree = fieldScores.primaryPurpose;
   let codeClarity: CodeClarity;
-  if (ppAgree >= 0.8 && overall >= 0.7) codeClarity = 'CLEAR';
-  else if (ppAgree < 0.4 || overall < 0.4) codeClarity = 'MISLEADING';
-  else codeClarity = 'AMBIGUOUS';
+  if (level === 'HIGH') codeClarity = 'CLEAR';
+  else if (level === 'MEDIUM') codeClarity = 'AMBIGUOUS';
+  else codeClarity = 'MISLEADING';
+  if (ppAgree < 0.35 && codeClarity !== 'MISLEADING') {
+    codeClarity = codeClarity === 'CLEAR' ? 'AMBIGUOUS' : 'MISLEADING';
+  }
 
   const reasoningParts: string[] = [];
   reasoningParts.push(
