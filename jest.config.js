@@ -3,6 +3,7 @@ module.exports = {
   testEnvironment: 'node',
   testMatch: ['**/*.test.ts'],
   moduleFileExtensions: ['ts', 'js'],
+  testPathIgnorePatterns: ['/node_modules/', '/.ai-comp-test/'],
   // Increase default timeout to reduce spurious timeouts in slow tests
   testTimeout: Number(process.env.JEST_TEST_TIMEOUT || 30000),
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
