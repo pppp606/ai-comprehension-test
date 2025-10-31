@@ -13,7 +13,7 @@ function createSource(code: string): ts.SourceFile {
 }
 
 function isThisProp(node: ts.Expression): { prop?: string } {
-  if (ts.isPropertyAccessExpression(node) && ts.isThis(node.expression)) {
+  if (ts.isPropertyAccessExpression(node) && node.expression.kind === ts.SyntaxKind.ThisKeyword) {
     return { prop: node.name.text };
   }
   return {};
