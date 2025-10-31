@@ -8,6 +8,11 @@ export interface StabilityScore {
   variations: Array<{ aspect: string; values: string[]; frequency: number }>;
   reasoning: string;
   codeClarity: CodeClarity;
+  coverage?: {
+    schemaCoverage: number; // 0-100
+    specificity: number; // 0-100 (higher = more concrete, fewer ambiguous words)
+    specificityModel?: number; // 0-100 (Transformers zero-shot based)
+  };
 }
 
 interface MR {
@@ -17,6 +22,12 @@ interface MR {
   sideEffects?: string[];
   keyBehaviors?: string[];
   invariants?: string[];
+  defaults?: Record<string, number | string | boolean | null>;
+  normalization?: Array<{ from: string; to: string }>;
+  limits?: Array<{ name: string; min?: string | number; max?: string | number; unit?: string }>;
+  constants?: string[];
+  errorConditions?: string[];
+  unknowns?: string[];
 }
 
 function tryParseJsonLike(raw: string): any | undefined {
@@ -29,7 +40,16 @@ function tryParseJsonLike(raw: string): any | undefined {
       try {
         return JSON.parse(fence[1]);
       } catch {
-        // ignore
+        // attempt lenient fixes on fenced content
+        const fixed = fence[1]
+          .replace(/\u2019/g, "'") // curly apostrophe to straight
+          .replace(/'([^']*)'/g, '"$1"') // single-quoted to double
+          .replace(/,\s*([}\]])/g, '$1'); // trailing commas
+        try {
+          return JSON.parse(fixed);
+        } catch {
+          // ignore
+        }
       }
     }
     // nearest object
@@ -38,7 +58,16 @@ function tryParseJsonLike(raw: string): any | undefined {
       try {
         return JSON.parse(obj[0]);
       } catch {
-        // ignore
+        // lenient fixes on nearest object
+        const fixed = obj[0]
+          .replace(/\u2019/g, "'")
+          .replace(/'([^']*)'/g, '"$1"')
+          .replace(/,\s*([}\]])/g, '$1');
+        try {
+          return JSON.parse(fixed);
+        } catch {
+          // ignore
+        }
       }
     }
   }
@@ -63,6 +92,81 @@ function tokensFromList(list: string[] | undefined): string[] {
   const out: string[] = [];
   for (const item of list || []) out.push(...tokenize(String(item)));
   return out;
+}
+
+// Ambiguous language detection for specificity scoring
+const AMBIGUOUS_TERMS = new Set<string>([
+  'maybe','might','possibly','could','should','often','usually','typically','around','about','approximately','roughly','some','various','several','few','sometimes'
+]);
+
+function countAmbiguousTerms(text: string): number {
+  return tokenize(text).reduce((acc, t) => acc + (AMBIGUOUS_TERMS.has(t) ? 1 : 0), 0);
+}
+
+function numberLikeCount(text: string): number {
+  const m = String(text).match(/-?\d+(?:\.\d+)?/g);
+  return m ? m.length : 0;
+}
+
+function boolLikeCount(text: string): number {
+  const m = tokenize(text).filter((t) => t === 'true' || t === 'false' || t === 'on' || t === 'off');
+  return m.length;
+}
+
+function computeSpecificity(mr: MR): number {
+  const fieldsAsText: string[] = [];
+  if (mr.primaryPurpose) fieldsAsText.push(mr.primaryPurpose);
+  for (const f of [mr.inputs, mr.outputs, mr.sideEffects, mr.keyBehaviors, mr.invariants, mr.constants, mr.errorConditions]) {
+    for (const v of (f as string[] | undefined) || []) fieldsAsText.push(String(v));
+  }
+  if (mr.normalization) {
+    for (const r of mr.normalization) fieldsAsText.push(`${r.from} -> ${r.to}`);
+  }
+  if (mr.limits) {
+    for (const l of mr.limits) fieldsAsText.push(`${l.name}:${l.min ?? ''}-${l.max ?? ''}${l.unit ? ' ' + l.unit : ''}`);
+  }
+  if (mr.defaults) {
+    for (const [k, v] of Object.entries(mr.defaults)) fieldsAsText.push(`${k}=${v}`);
+  }
+
+  // Heuristic: more numeric/bool literals increase specificity; ambiguous terms decrease it.
+  let nums = 0;
+  let bools = 0;
+  let amb = 0;
+  for (const t of fieldsAsText) {
+    nums += numberLikeCount(t);
+    bools += boolLikeCount(t);
+    amb += countAmbiguousTerms(t);
+  }
+  const signal = nums + bools; // concrete signals
+  const penalty = amb;
+  // Normalize to 0-100 with diminishing returns
+  const raw = (Math.atan(signal / 3) / (Math.PI / 2)) * 100; // 0..100
+  const penaltyPct = Math.min(30, penalty * 5); // cap 30%
+  return Math.max(0, Math.min(100, Math.round(raw - penaltyPct)));
+}
+
+function computeSchemaCoverage(mr: MR): number {
+  // Consider the extended concrete fields in Phase 1
+  const slots: Array<[string, unknown]> = [
+    ['defaults', mr.defaults],
+    ['normalization', mr.normalization],
+    ['limits', mr.limits],
+    ['constants', mr.constants],
+    ['errorConditions', mr.errorConditions],
+  ];
+  let filled = 0;
+  let total = 0;
+  for (const [name, val] of slots) {
+    total += 1;
+    let hasContent = false;
+    if (Array.isArray(val)) hasContent = val.length > 0;
+    else if (val && typeof val === 'object') hasContent = Object.keys(val as object).length > 0;
+    else hasContent = !!val;
+    if (hasContent) filled += 1;
+  }
+  if (total === 0) return 0;
+  return Math.round((filled / total) * 100);
 }
 
 type Vector = Map<string, number>; // sparse TF-IDF
@@ -283,6 +387,29 @@ export function scoreStability(responses: string[]): StabilityScore {
       sideEffects: Array.isArray(v.sideEffects) ? v.sideEffects.map(String) : [],
       keyBehaviors: Array.isArray(v.keyBehaviors) ? v.keyBehaviors.map(String) : [],
       invariants: Array.isArray(v.invariants) ? v.invariants.map(String) : [],
+      defaults: v && typeof v === 'object' && v.defaults && typeof v.defaults === 'object' ? (v.defaults as Record<string, any>) : {},
+      normalization: Array.isArray((v as any).normalization)
+        ? ((v as any).normalization as any[])
+            .map((x) => (x && typeof x === 'object' ? { from: String((x as any).from ?? ''), to: String((x as any).to ?? '') } : undefined))
+            .filter(Boolean) as Array<{ from: string; to: string }>
+        : [],
+      limits: Array.isArray((v as any).limits)
+        ? ((v as any).limits as any[])
+            .map((x) =>
+              x && typeof x === 'object'
+                ? {
+                    name: String((x as any).name ?? ''),
+                    min: (x as any).min,
+                    max: (x as any).max,
+                    unit: (x as any).unit ? String((x as any).unit) : undefined,
+                  }
+                : undefined,
+            )
+            .filter(Boolean) as Array<{ name: string; min?: string | number; max?: string | number; unit?: string }>
+        : [],
+      constants: Array.isArray((v as any).constants) ? (v as any).constants.map(String) : [],
+      errorConditions: Array.isArray((v as any).errorConditions) ? (v as any).errorConditions.map(String) : [],
+      unknowns: Array.isArray((v as any).unknowns) ? (v as any).unknowns.map(String) : [],
     }));
 
   if (mrs.length === 0) {
@@ -293,6 +420,7 @@ export function scoreStability(responses: string[]): StabilityScore {
       variations: [],
       reasoning: 'No valid MR responses could be parsed.',
       codeClarity: 'MISLEADING',
+      coverage: { schemaCoverage: 0, specificity: 0 },
     };
   }
 
@@ -385,6 +513,13 @@ export function scoreStability(responses: string[]): StabilityScore {
     reasoningParts.push('Minor differences only.');
   }
 
+  // Coverage/specificity: compute from the modal MR (best-effort)
+  const modalIndex = 0; // simple heuristic: first parsed MR
+  const cov: { schemaCoverage: number; specificity: number; specificityModel?: number } = {
+    schemaCoverage: computeSchemaCoverage(mrs[modalIndex] || {}),
+    specificity: computeSpecificity(mrs[modalIndex] || {}),
+  };
+
   return {
     consistencyScore: score,
     consistencyLevel: level,
@@ -392,6 +527,7 @@ export function scoreStability(responses: string[]): StabilityScore {
     variations,
     reasoning: reasoningParts.join(' '),
     codeClarity,
+    coverage: cov,
   };
 }
 
@@ -576,12 +712,39 @@ export async function scoreStabilityEmbedding(responses: string[]): Promise<Stab
     reasoningParts.push('Minor differences only.');
   }
 
+  // Coverage/specificity via model (optional)
+  let cov: { schemaCoverage: number; specificity: number; specificityModel?: number } | undefined;
+  try {
+    const modalIndex = 0;
+    const parsed = mrs[modalIndex] || {};
+    const { ambiguityScores, mrToText } = await import('./ambiguity');
+    const text = mrToText(parsed);
+    const scores = await ambiguityScores(text);
+    cov = {
+      schemaCoverage: computeSchemaCoverage(parsed as any),
+      specificity: computeSpecificity(parsed as any),
+      specificityModel: scores.specific,
+    };
+  } catch {
+    // ignore
+  }
+
+  // Optionally blend in model ambiguity as part of score
+  let finalScore = score;
+  let finalLevel: ConsistencyLevel = level;
+  if ((process.env.AI_COMP_TEST_AMBIGUITY === 'model' || process.env.AI_COMP_TEST_AMBIGUITY === 'hybrid') && cov?.specificityModel != null && process.env.AI_COMP_TEST_INCLUDE_AMBIGUITY_IN_SCORE === '1') {
+    const w = Math.min(0.5, Math.max(0, Number(process.env.AI_COMP_TEST_AMBIGUITY_WEIGHT || '0.15')));
+    finalScore = Math.round(score * (1 - w) + (cov!.specificityModel as number) * w);
+    finalLevel = finalScore >= 75 ? 'HIGH' : finalScore >= 50 ? 'MEDIUM' : 'LOW';
+  }
+
   return {
-    consistencyScore: score,
-    consistencyLevel: level,
+    consistencyScore: finalScore,
+    consistencyLevel: finalLevel,
     mainIdea,
     variations,
     reasoning: reasoningParts.join(' '),
     codeClarity,
+    coverage: cov,
   };
 }

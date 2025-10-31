@@ -10,25 +10,31 @@ export class TestGenerator {
 
   generate(): Test[] {
     const tests: Test[] = [];
+    const allowedTypes = (process.env.AI_COMP_TEST_TYPES || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const allow = (t: 'static-analysis' | 'stability' | 'test-generation') =>
+      allowedTypes.length === 0 || allowedTypes.includes(t);
     const shouldGenerateAll = this.options.hasFileSpecification;
 
     for (const cls of this.structure.classes) {
-      if (shouldGenerateAll || this.shouldTestStaticAnalysis(cls)) {
+      if ((shouldGenerateAll || this.shouldTestStaticAnalysis(cls)) && allow('static-analysis')) {
         tests.push(this.createStaticAnalysisTestForClass(cls));
 
         for (const method of cls.methods) {
-          if (shouldGenerateAll || this.shouldTestStaticAnalysis(method)) {
+          if ((shouldGenerateAll || this.shouldTestStaticAnalysis(method)) && allow('static-analysis')) {
             tests.push(this.createStaticAnalysisTestForMethod(cls, method));
           }
         }
       }
 
-      if (shouldGenerateAll || this.shouldTestStability(cls)) {
+      if ((shouldGenerateAll || this.shouldTestStability(cls)) && allow('stability')) {
         tests.push(this.createStabilityTestForClass(cls));
       }
 
       for (const method of cls.methods) {
-        if (shouldGenerateAll || this.shouldTestGeneration(method)) {
+        if ((shouldGenerateAll || this.shouldTestGeneration(method)) && allow('test-generation')) {
           tests.push(this.createTestGenerationTest(cls, method));
         }
       }

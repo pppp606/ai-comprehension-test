@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/schemas/mr.schema.json",
+  "title": "Meaning Representation (MR)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "primaryPurpose",
+    "inputs",
+    "outputs",
+    "sideEffects",
+    "keyBehaviors",
+    "invariants",
+    "defaults",
+    "normalization",
+    "limits",
+    "constants",
+    "errorConditions",
+    "unknowns"
+  ],
+  "properties": {
+    "primaryPurpose": { "type": "string" },
+    "inputs": { "type": "array", "items": { "type": "string" } },
+    "outputs": { "type": "array", "items": { "type": "string" } },
+    "sideEffects": { "type": "array", "items": { "type": "string" } },
+    "keyBehaviors": { "type": "array", "items": { "type": "string" } },
+    "invariants": { "type": "array", "items": { "type": "string" } },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          { "type": "number" },
+          { "type": "string" },
+          { "type": "boolean" },
+          { "type": "null" }
+        ]
+      }
+    },
+    "normalization": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from", "to"],
+        "additionalProperties": false,
+        "properties": {
+          "from": { "type": "string" },
+          "to": { "type": "string" }
+        }
+      }
+    },
+    "limits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "min": { "anyOf": [ {"type":"number"}, {"type":"string"} ] },
+          "max": { "anyOf": [ {"type":"number"}, {"type":"string"} ] },
+          "unit": { "type": "string" }
+        }
+      }
+    },
+    "constants": { "type": "array", "items": { "type": "string" } },
+    "errorConditions": { "type": "array", "items": { "type": "string" } },
+    "unknowns": { "type": "array", "items": { "type": "string" } }
+  }
+}
+

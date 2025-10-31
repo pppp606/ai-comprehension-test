@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import path from 'path';
 import { AIAgentConfig, CallOptions, ExecOptions, ExecResult } from '../types';
+import { extractFactsFromCode } from './groundedness-checker';
 
 export const DEFAULT_AGENT_CONFIG: AIAgentConfig = {
   command: 'claude',
@@ -90,6 +91,10 @@ export class AIAgentClient {
     const workingDir = options?.workingDir || this.config.workingDir;
     const timeout = options?.timeout || this.config.timeout;
 
+    if (command === 'local-mr') {
+      return this.callLocal(prompt);
+    }
+
     if (command === 'claude') {
       const result = await execCommand(command, this.config.args, {
         input: prompt,
@@ -115,5 +120,92 @@ export class AIAgentClient {
       timeout,
     });
     return result.stdout.trim();
+  }
+
+  private callLocal(prompt: string): string {
+    // Detect prompt type by markers
+    if (/Respond ONLY with JSON in this exact format/.test(prompt) && /nameAccuracy/.test(prompt)) {
+      // static-analysis shape
+      return JSON.stringify({
+        nameAccuracy: true,
+        nameAccuracyScore: 85,
+        issues: [],
+        suggestions: [],
+        clarity: 'HIGH',
+        reasoning: 'Name broadly matches implementation.'
+      });
+    }
+
+    // Stability MR expected (contains primaryPurpose field in schema section)
+    if (/primaryPurpose/.test(prompt) && /## Output/.test(prompt)) {
+      const code = this.extractCode(prompt);
+      const docDefaults = this.extractDocDefaults(code);
+      const facts = extractFactsFromCode(code);
+      const hasOnOff = facts.some((f) => f.kind === 'constant');
+      const hasTimeoutNorm = facts.some((f) => f.kind === 'timeout');
+      const factLimits = facts
+        .filter((f) => f.kind === 'limit')
+        .map((f) => ({ name: String(f.key || 'value'), min: f.min, max: f.max, unit: f.unit || (f.max || f.min ? 'ms' : undefined) }));
+
+      const mr = {
+        primaryPurpose: 'Manage connections with optional retries and timeouts',
+        inputs: ['endpoint'],
+        outputs: ['none'],
+        sideEffects: ['time delays', 'randomized attempts'],
+        keyBehaviors: ['attempt connection', 'apply retry policy', 'respect timeout'],
+        invariants: ['throws on failure'],
+        defaults: docDefaults,
+        normalization: hasTimeoutNorm ? [{ from: 's', to: 'ms' }] : [],
+        limits: factLimits,
+        constants: hasOnOff ? ['on', 'off'] : [],
+        errorConditions: ['all attempts fail'],
+        unknowns: [],
+      };
+      return JSON.stringify(mr);
+    }
+
+    // Test generation: return a minimal TS test file
+    if (/You are generating a Jest test file/.test(prompt)) {
+      return [
+        "import { describe, it, expect } from '@jest/globals';",
+        'describe("Generated", () => {',
+        '  it("placeholder", () => {',
+        '    expect(true).toBe(true);',
+        '  });',
+        '});',
+        ''
+      ].join('\n');
+    }
+
+    // Default fallback
+    return '';
+  }
+
+  private extractCode(prompt: string): string {
+    const match = prompt.match(/```typescript\n([\s\S]+?)\n```/);
+    return match ? match[1] : '';
+  }
+
+  private extractDocDefaults(code: string): Record<string, number | string | boolean> {
+    const out: Record<string, number | string | boolean> = {};
+    const headerMatch = code.match(/\/\*\*[\s\S]*?\*\//);
+    const header = headerMatch ? headerMatch[0] : '';
+    function setDefault(key: string, val: string) {
+      if (/^(true|false)$/i.test(val)) out[key] = /^true$/i.test(val);
+      else if (/^\d+s$/.test(val)) out[key] = parseInt(val, 10) * 1000;
+      else if (/^\d+ms$/.test(val)) out[key] = parseInt(val, 10);
+      else if (/^\d+$/.test(val)) out[key] = parseInt(val, 10);
+      else out[key] = val;
+    }
+    const lines = header.split(/\r?\n/).map((l) => l.replace(/^\s*\*\s?/, '').trim());
+    for (const line of lines) {
+      const m1 = line.match(/-\s*timeout:\s*([0-9]+\s*s|[0-9]+\s*ms|[0-9]+)\b/i);
+      if (m1) setDefault('timeoutMs', m1[1].replace(/\s+/g, ''));
+      const m2 = line.match(/-\s*retries:\s*([0-9]+)/i);
+      if (m2) setDefault('retryLimit', m2[1]);
+      const m3 = line.match(/-\s*secure:\s*(true|false)/i);
+      if (m3) setDefault('secure', m3[1].toLowerCase());
+    }
+    return out;
   }
 }

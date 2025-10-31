@@ -51,6 +51,16 @@ export interface StabilityResult extends TestResult {
     }>;
     reasoning: string;
     codeClarity: 'CLEAR' | 'AMBIGUOUS' | 'MISLEADING';
+    coverage?: {
+      schemaCoverage: number; // 0-100
+      specificity: number; // 0-100
+      specificityModel?: number; // 0-100
+    };
+    groundedness?: {
+      score: number; // 0-100
+      mismatches: Array<{ fact: string; claim: string; note?: string }>;
+      factCoverage?: number; // 0-100
+    };
   };
 }
 
