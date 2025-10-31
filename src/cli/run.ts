@@ -15,6 +15,7 @@ interface RunOptions {
   format: 'console' | 'json';
   verbose?: boolean;
   printPrompts?: boolean;
+  jsonFile?: string;
 }
 
 export async function runCommand(projectPath: string, options: RunOptions): Promise<void> {
@@ -84,7 +85,7 @@ export async function runCommand(projectPath: string, options: RunOptions): Prom
   });
 
   if (options.format === 'json') {
-    const filePath = await writeJsonReport(report, path.resolve(options.output));
+    const filePath = await writeJsonReport(report, path.resolve(options.output), options.jsonFile || 'results.json');
     console.log(`JSON report written to ${filePath}`);
   } else {
     printConsoleReport(report);

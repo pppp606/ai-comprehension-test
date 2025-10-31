@@ -21,6 +21,7 @@ program
   .option('--format <format>', 'Report format: console | json', 'console')
   .option('--verbose', 'Enable verbose logging', false)
   .option('--print-prompts', 'Print generated prompts and exit (dry-run)', false)
+  .option('--json-file <file>', 'Output JSON filename when --format=json (default: results.json)', 'results.json')
   .action(async (projectPath: string, options: any) => {
     try {
       await runCommand(projectPath, {
@@ -29,6 +30,7 @@ program
         format: options.format,
         verbose: options.verbose,
         printPrompts: options.printPrompts,
+        jsonFile: options.jsonFile,
       });
     } catch (error: any) {
       console.error(error?.message || error);

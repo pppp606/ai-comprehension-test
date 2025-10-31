@@ -64,6 +64,21 @@ export function printConsoleReport(report: TestResults): void {
       if (typeof result.score === 'number') {
         console.log(`   Consistency: ${result.score}% (${result.data?.consistencyLevel || 'UNKNOWN'})`);
       }
+      if (result.data?.coverage) {
+        const cov = result.data.coverage;
+        const specPart = cov.specificityModel != null
+          ? `specificity ${cov.specificity}% (model ${cov.specificityModel}%)`
+          : `specificity ${cov.specificity}%`;
+        console.log(`   Coverage: schema ${cov.schemaCoverage}% | ${specPart}`);
+      }
+      if (result.data?.groundedness) {
+        const gr = result.data.groundedness;
+        console.log(`   Groundedness: ${gr.score ?? 0}%` + (gr.factCoverage != null ? ` (fact coverage ${gr.factCoverage}%)` : ''));
+        if (gr.mismatches && gr.mismatches.length > 0) {
+          const first = gr.mismatches.slice(0, 2).map((m: any) => m.fact).join('; ');
+          console.log(`   Mismatches: ${first}${gr.mismatches.length > 2 ? ' …' : ''}`);
+        }
+      }
       if (!result.passed && result.data?.codeClarity) {
         console.log(`   Code Clarity: ${result.data.codeClarity}`);
       }

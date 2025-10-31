@@ -72,43 +72,155 @@ export class TestRunner {
   }
 
   private async runStability(test: Test): Promise<StabilityResult> {
-    const iterations = test.iterations ?? 5;
-    const responses: string[] = [];
+    const iterations = Number(process.env.AI_COMP_TEST_STABILITY_ITER || '') || (test.iterations ?? 5);
+    const repeats = Math.max(1, Number(process.env.AI_COMP_TEST_REPEAT || '1'));
 
-    for (let i = 0; i < iterations; i += 1) {
-      const response = await this.agent.call(test.prompt);
-      responses.push(response.trim());
+    function median(nums: number[]): number {
+      const arr = nums.slice().filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+      if (!arr.length) return 0;
+      const mid = Math.floor(arr.length / 2);
+      return arr.length % 2 ? arr[mid] : Math.round((arr[mid - 1] + arr[mid]) / 2);
     }
 
-    // Compute local stability score using parsed MR responses
-    const mode = process.env.AI_COMP_TEST_STABILITY_MODE || 'tfidf';
-    let local: any;
-    if (mode === 'embedding') {
-      const { scoreStabilityEmbedding } = await import('./stability-scorer');
-      local = await scoreStabilityEmbedding(responses);
-    } else {
-      const { scoreStability } = await import('./stability-scorer');
-      local = scoreStability(responses);
+    const runOnce = async () => {
+      const responses: string[] = [];
+      for (let i = 0; i < iterations; i += 1) {
+        const response = await this.agent.call(test.prompt);
+        responses.push(response.trim());
+      }
+      const mode = process.env.AI_COMP_TEST_STABILITY_MODE || 'tfidf';
+      let local: any;
+      if (mode === 'embedding') {
+        const { scoreStabilityEmbedding } = await import('./stability-scorer');
+        local = await scoreStabilityEmbedding(responses);
+      } else {
+        const { scoreStability } = await import('./stability-scorer');
+        local = scoreStability(responses);
+      }
+
+      let coverage: { schemaCoverage: number; specificity: number; specificityModel?: number } | undefined = local.coverage as any;
+      let adjustedScore = local.consistencyScore as number;
+      let adjustedLevel = local.consistencyLevel as 'HIGH' | 'MEDIUM' | 'LOW' | undefined;
+      let groundedness: { score: number; mismatches: Array<{ fact: string; claim: string; note?: string }>; factCoverage?: number } | undefined;
+      try {
+        const code = (this as any).extractCode(test.prompt) as string;
+        const first = responses[0];
+        if (code && first) {
+          const parsed = this.parseJson(first, test.id);
+          const { computeGroundedness } = await import('./groundedness-checker');
+          const gr = computeGroundedness(code, parsed);
+          groundedness = { score: gr.score, mismatches: gr.mismatches as any, factCoverage: gr.factCoverage };
+
+          // recompute coverage from parsed
+          const slots: Array<[string, unknown]> = [
+            ['defaults', parsed?.defaults],
+            ['normalization', parsed?.normalization],
+            ['limits', parsed?.limits],
+            ['constants', parsed?.constants],
+            ['errorConditions', parsed?.errorConditions],
+          ];
+          let filled = 0;
+          let total = 0;
+          for (const [, val] of slots) {
+            total += 1;
+            let hasContent = false;
+            if (Array.isArray(val)) hasContent = val.length > 0;
+            else if (val && typeof val === 'object') hasContent = Object.keys(val as object).length > 0;
+            else hasContent = !!val;
+            if (hasContent) filled += 1;
+          }
+          const schemaCoverageComputed = total ? Math.round((filled / total) * 100) : 0;
+          const textParts: string[] = [];
+          if (parsed?.primaryPurpose) textParts.push(parsed.primaryPurpose);
+          for (const f of [parsed?.inputs, parsed?.outputs, parsed?.sideEffects, parsed?.keyBehaviors, parsed?.invariants]) {
+            for (const v of (f as string[] | undefined) || []) textParts.push(String(v));
+          }
+          const nums = textParts.join(' ').match(/-?\d+(?:\.\d+)?/g)?.length || 0;
+          const bools = (textParts.join(' ').match(/\b(true|false|on|off)\b/gi) || []).length;
+          const amb = (textParts.join(' ').match(/\b(maybe|might|possibly|could|usually|typically|around|about|approximately|roughly|sometimes)\b/gi) || []).length;
+          const raw = (Math.atan((nums + bools) / 3) / (Math.PI / 2)) * 100;
+          const specificityComputed = Math.max(0, Math.min(100, Math.round(raw - Math.min(30, amb * 5))));
+          coverage = { schemaCoverage: schemaCoverageComputed, specificity: specificityComputed } as any;
+
+          if (process.env.AI_COMP_TEST_AMBIGUITY === 'model' || process.env.AI_COMP_TEST_AMBIGUITY === 'hybrid') {
+            try {
+              const { ambiguityScores, mrToText } = await import('./ambiguity');
+              const text = mrToText(parsed);
+              const scores = await ambiguityScores(text);
+              (coverage as any).specificityModel = scores.specific;
+              if (process.env.AI_COMP_TEST_INCLUDE_AMBIGUITY_IN_SCORE === '1') {
+                const w = Math.min(0.5, Math.max(0, Number(process.env.AI_COMP_TEST_AMBIGUITY_WEIGHT || '0.15')));
+                adjustedScore = Math.round(adjustedScore * (1 - w) + scores.specific * w);
+                adjustedLevel = adjustedScore >= 75 ? 'HIGH' : adjustedScore >= 50 ? 'MEDIUM' : 'LOW';
+              }
+            } catch {
+              // ignore
+            }
+          }
+        }
+      } catch {}
+
+      const passed = adjustedScore >= 50;
+      return {
+        testId: test.id,
+        testName: test.name,
+        type: 'stability',
+        passed,
+        targetElement: test.targetElement,
+        score: adjustedScore,
+        data: {
+          responses,
+          consistencyScore: adjustedScore,
+          consistencyLevel: adjustedLevel || 'LOW',
+          mainIdea: local.mainIdea || '',
+          variations: local.variations || [],
+          reasoning: local.reasoning || '',
+          codeClarity: local.codeClarity || 'AMBIGUOUS',
+          coverage: coverage,
+          groundedness: groundedness,
+        },
+        executedAt: new Date(),
+      } as StabilityResult;
+    };
+
+    if (repeats === 1) {
+      return await runOnce();
     }
-    const score = local.consistencyScore;
-    const level = local.consistencyLevel as 'HIGH' | 'MEDIUM' | 'LOW' | undefined;
-    const passed = score >= 50;
+
+    const runs: StabilityResult[] = [];
+    for (let r = 0; r < repeats; r++) runs.push(await runOnce());
+
+    const scores = runs.map((r) => r.score || 0);
+    const covSchema = runs.map((r) => r.data?.coverage?.schemaCoverage ?? 0);
+    const covSpec = runs.map((r) => r.data?.coverage?.specificity ?? 0);
+    const covSpecM = runs.map((r) => r.data?.coverage?.specificityModel).filter((v): v is number => typeof v === 'number');
+    const grd = runs.map((r) => r.data?.groundedness?.score).filter((v): v is number => typeof v === 'number');
+    const grdFC = runs.map((r) => r.data?.groundedness?.factCoverage).filter((v): v is number => typeof v === 'number');
+
+    const mScore = median(scores);
+    const mLevel: 'HIGH' | 'MEDIUM' | 'LOW' = mScore >= 75 ? 'HIGH' : mScore >= 50 ? 'MEDIUM' : 'LOW';
 
     return {
       testId: test.id,
       testName: test.name,
       type: 'stability',
-      passed,
+      passed: mScore >= 50,
       targetElement: test.targetElement,
-      score,
+      score: mScore,
       data: {
-        responses,
-        consistencyScore: score,
-        consistencyLevel: level || 'LOW',
-        mainIdea: local.mainIdea || '',
-        variations: local.variations || [],
-        reasoning: local.reasoning || '',
-        codeClarity: local.codeClarity || 'AMBIGUOUS',
+        responses: [],
+        consistencyScore: mScore,
+        consistencyLevel: mLevel,
+        mainIdea: runs[0].data?.mainIdea || '',
+        variations: runs[0].data?.variations || [],
+        reasoning: `Median over ${repeats} runs`,
+        codeClarity: runs[0].data?.codeClarity || 'AMBIGUOUS',
+        coverage: {
+          schemaCoverage: median(covSchema),
+          specificity: median(covSpec),
+          specificityModel: covSpecM.length ? median(covSpecM) : undefined,
+        },
+        groundedness: grd.length ? { score: median(grd), mismatches: [], factCoverage: grdFC.length ? median(grdFC) : undefined } : undefined,
       },
       executedAt: new Date(),
     };
