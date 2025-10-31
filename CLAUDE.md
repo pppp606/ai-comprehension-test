@@ -1,10 +1,12 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) and similar coding agents.
 
 ## Overview
 
-`ai-comprehension-test` is a CLI tool that evaluates how easily an AI coding agent can understand a TypeScript codebase. It scans TypeScript files, generates comprehension tests, executes them through a local AI agent (like Claude or Codex), and produces detailed reports.
+`ai-comprehension-test` is a CLI tool that evaluates how easily an AI coding agent can understand a TypeScript codebase. It scans TypeScript files, generates comprehension tests, executes them through a local AI agent (like Claude or Codex), and produces grounded reports.
+
+Meta-structure (very important): The goal is not “to make tests pass.” The goal is to judge AI readability of code. We compare what the LLM claims (MR) with facts deterministically extracted from code (Reference MR via AST). If tests fail because the AI refuses to hallucinate or marks unknowns properly, that may be correct and desired.
 
 ## Build, Test, and Development Commands
 
@@ -32,16 +34,22 @@ npx ai-comprehension-test run [project-path] [options]
 - `--format <format>` - Output format: `console` or `json`
 - `--verbose` - Enable detailed logging
 
-### Environment Variables for AI Agent Configuration
+### Environment Variables
 
 - `AI_COMP_TEST_COMMAND` - AI agent command (default: `claude`)
 - `AI_COMP_TEST_ARGS` - Arguments for the agent (default: `-p`)
 - `AI_COMP_TEST_TIMEOUT` - Timeout in seconds (default: `180`)
 - `AI_COMP_TEST_DEBUG` - Enable debug output (default: `false`)
+- `AI_COMP_TEST_TYPES` - Comma-separated test types to run
+- `AI_COMP_TEST_STABILITY_ITER` - Responses per stability test
+- `AI_COMP_TEST_STABILITY_PROMPT_MODE` - `gamified` to enable +1/0/−1 rule (no guessing)
+- `AI_COMP_TEST_INCLUDE_SCHEMA` - Include MR schema and example in prompts (default on)
+- `AI_COMP_TEST_RECOMPUTE_COVERAGE` - Recompute coverage from MR in runner
+- Optional ambiguity model: `AI_COMP_TEST_AMBIGUITY`, `AI_COMP_TEST_AMBIGUITY_MODEL`, `AI_COMP_TEST_INCLUDE_AMBIGUITY_IN_SCORE`, `AI_COMP_TEST_AMBIGUITY_WEIGHT`
 
 ## Architecture
 
-### Core Execution Flow
+### Core Execution Flow (high level)
 
 1. **Scanning** (`TypeScriptScanner` in `src/scanner/`) - Uses TypeScript compiler API to parse files and extract classes, methods, functions with metadata (signature, LOC, parameters, etc.)
 2. **Test Generation** (`TestGenerator` in `src/core/`) - Creates three types of tests based on heuristics:
@@ -50,6 +58,16 @@ npx ai-comprehension-test run [project-path] [options]
    - **Test Generation**: Asks AI to generate Jest tests for methods
 3. **Test Execution** (`TestRunner` in `src/core/`) - Orchestrates AI calls and Jest execution
 4. **Reporting** (`src/reporter/`) - Formats results as console output or JSON
+
+### Stability + Groundedness (what matters here)
+
+- Stability is computed locally by comparing multiple LLM MR responses using TF‑IDF cosine per field; it yields `consistencyScore/Level`, `mainIdea`, `variations`, `reasoning`, `codeClarity`.
+- Groundedness compares the LLM MR to a Reference MR extracted from code via AST:
+  - Reference MR (`src/core/ref-extractor.ts`) collects defaults (`this.x=…`/`??`), limits (nested `Math.min/max`), normalization (s→ms), and constants.
+  - Checker (`src/core/groundedness-checker.ts`) matches LLM MR ↔ Reference MR (key or value-only partial match) to compute `factCoverage` and `mismatches`.
+  - Score is `factCoverage` (0–100). This is the main evidence of “AI read the code correctly.”
+
+Design principle: Do not tune tests to pass. Instead, tune extraction and matching so they reflect code facts. Unknowns are neutral; hallucinations are penalized (via prompt rules and mismatches).
 
 ### Key Components
 
@@ -76,9 +94,8 @@ npx ai-comprehension-test run [project-path] [options]
 - Calculates LOC by counting non-empty lines
 
 **Prompt Templates** (`src/templates/`)
-- Separated into individual modules: `static-analysis.ts`, `stability.ts`, `stability-judgment.ts`, `test-generation.ts`
-- All expect structured JSON responses from AI
-- Test generation prompts expect valid Jest/TypeScript test code
+- `stability.ts` includes MR schema (see `schemas/mr.schema.json`), a concrete example, “no hedging”, “keys required”, and the +1/0/−1 rule.
+- `static-analysis.ts`, `test-generation.ts` remain as before (structured outputs).
 
 ### Data Flow
 
@@ -108,15 +125,13 @@ All core types are defined in `src/types/index.ts`:
 
 ## Testing Strategy
 
-When writing tests:
-- Unit tests go in `src/*/___tests__/` directories
-- Use vitest as the test runner
+- Unit tests go in `src/*/__tests__/` directories（Jest）
 - Mock `AIAgentClient` and `JestRunner` for isolated unit tests
-- For integration tests, use small fixture TypeScript files
+- Integration tests should use tiny TS snippets; do not rely on networked LLMs in CI
 
 ## Notes
 
-- The tool expects `jest` and `ts-jest` to be available when running test-generation tests
-- TypeScript compilation targets ES2019 with CommonJS modules
-- All file paths should be resolved to absolute paths internally
-- The scanner ignores `.d.ts` files and only processes `.ts` files
+- The tool expects `jest` and `ts-jest` to be available when running test-generation tests.
+- TypeScript compilation targets ES2019 with CommonJS modules.
+- The scanner ignores `.d.ts` files and only processes `.ts` files.
+- The `.ai-comp-test` directory contains generated outputs and should be ignored by Jest in CI.
